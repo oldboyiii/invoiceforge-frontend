@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@/hooks/useWallet';
 import { useInvoice, useFXBlitz } from '@/hooks/useContract';
-import { Contract } from 'ethers';
 import { formatUSDC, formatAddress, statusLabels, statusColors, safeBigInt, safeDate } from '@/utils/format';
-import { ARC_EXPLORER, USDC_ADDRESS } from '@/config/contracts';
+import { ARC_EXPLORER } from '@/config/contracts';
 import { Loader2, HandCoins, ExternalLink } from 'lucide-react';
 
 interface MarketInvoice {
@@ -40,6 +39,8 @@ function parseInvoice(raw: any) {
   };
 }
 
+const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
+
 // Таймаут для RPC вызовов
 const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> => {
   return Promise.race([
@@ -49,16 +50,15 @@ const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> => {
 };
 
 export default function FactoringMarket() {
-  const { address, signer, provider, isConnected, isArcNetwork } = useWallet();
+  const { address, signer, isConnected, isArcNetwork } = useWallet();
   const contract = useInvoice(signer);
-  const readContract = useInvoice(provider);
-  const fxblitz = useFXBlitz(provider);
+  const readContract = useInvoice(signer);
+  const fxblitz = useFXBlitz(signer);
 
   const [invoices, setInvoices] = useState<MarketInvoice[]>([]);
   const [loading, setLoading] = useState(false);
   const [actionId, setActionId] = useState<bigint | null>(null);
   const [offerAmount, setOfferAmount] = useState('');
-  const [usdcDecimals, setUsdcDecimals] = useState(18);
   const [error, setError] = useState<string | null>(null);
 
   const fetchMarket = useCallback(async () => {
@@ -66,45 +66,39 @@ export default function FactoringMarket() {
     setLoading(true);
     setError(null);
     try {
-      console.log('Fetching market...');
       const items: MarketInvoice[] = [];
       let consecutiveErrors = 0;
 
-      // Пробуем ID от 1 до 50 с таймаутом 3 сек на каждый
       for (let i = 1; i <= 50; i++) {
         try {
           const raw = await withTimeout(readContract.getInvoice(BigInt(i)), 3000);
-          console.log('Invoice', i, 'raw:', raw);
           const inv = parseInvoice(raw);
 
+          // Пропускаем пустые/несуществующие инвойсы
+          if (inv.issuer === ZERO_ADDR || inv.amount === 0n) {
+            consecutiveErrors++;
+            if (consecutiveErrors >= 5) break;
+            continue;
+          }
+
           if (inv.status !== 0) continue;
-          if (inv.issuer?.toLowerCase() === address.toLowerCase()) continue;
-          if (inv.client?.toLowerCase() === address.toLowerCase()) continue;
+          if (inv.issuer.toLowerCase() === address.toLowerCase()) continue;
+          if (inv.client.toLowerCase() === address.toLowerCase()) continue;
 
           let games = 0n;
           try {
             const g = await withTimeout(fxblitz.gamesPlayed(inv.client), 3000);
             games = safeBigInt(g);
-          } catch (e) {
-            console.log('gamesPlayed error for', inv.client, e);
-          }
+          } catch { /* ignore */ }
 
-          items.push({
-            ...inv,
-            clientGamesPlayed: games,
-          });
+          items.push({ ...inv, clientGamesPlayed: games });
           consecutiveErrors = 0;
         } catch (e: any) {
-          console.log('Invoice', i, 'error:', e.message || e);
           consecutiveErrors++;
-          if (consecutiveErrors >= 5) {
-            console.log('Stopping after 5 consecutive errors');
-            break;
-          }
+          if (consecutiveErrors >= 5) break;
         }
       }
 
-      console.log('Market items:', items);
       setInvoices(items);
     } catch (err: any) {
       console.error('Fetch market error:', err);
@@ -115,17 +109,6 @@ export default function FactoringMarket() {
   }, [readContract, fxblitz, address]);
 
   useEffect(() => {
-    if (provider) {
-      const usdc = new Contract(
-        USDC_ADDRESS,
-        ['function decimals() view returns (uint8)'],
-        provider
-      );
-      usdc.decimals().then((d: number) => setUsdcDecimals(d)).catch(() => setUsdcDecimals(18));
-    }
-  }, [provider]);
-
-  useEffect(() => {
     if (isConnected && isArcNetwork) fetchMarket();
   }, [isConnected, isArcNetwork, fetchMarket]);
 
@@ -133,8 +116,7 @@ export default function FactoringMarket() {
     if (!contract || !offerAmount) return;
     setActionId(invoiceId);
     try {
-      const decimals = usdcDecimals;
-      const amount = BigInt(Math.floor(parseFloat(offerAmount) * 10 ** decimals));
+      const amount = BigInt(Math.floor(parseFloat(offerAmount) * 10 ** 6));
       const tx = await contract.requestFactoring(invoiceId, amount);
       await tx.wait();
       setOfferAmount('');
@@ -182,80 +164,87 @@ export default function FactoringMarket() {
       ) : invoices.length === 0 ? (
         <div className="text-center py-20 text-gray-500">
           <p>No available invoices for factoring</p>
-          <p className="text-xs mt-2 text-gray-400">Try creating an invoice first or check console (F12) for errors</p>
+          <p className="text-xs mt-2 text-gray-400">Create an invoice first to see it here</p>
         </div>
       ) : (
         <div className="grid gap-4">
-          {invoices.map((inv) => (
-            <div key={String(inv.id)} className="card">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div className="flex-1 space-y-2">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <span className="font-mono text-sm text-gray-500">#{String(inv.id)}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[inv.status] || 'bg-gray-100 text-gray-800'}`}>
-                      {statusLabels[inv.status] || 'Unknown'}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                      Number(inv.clientGamesPlayed) >= 1 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                    }`}>
-                      FXBlitz: {String(inv.clientGamesPlayed)} games
-                    </span>
+          {invoices.map((inv) => {
+            const statusLabel = statusLabels[inv.status];
+            const statusColor = statusColors[inv.status];
+
+            return (
+              <div key={String(inv.id)} className="card">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="font-mono text-sm text-gray-500">#{String(inv.id)}</span>
+                      {statusLabel && (
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColor}`}>
+                          {statusLabel}
+                        </span>
+                      )}
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                        Number(inv.clientGamesPlayed) >= 1 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      }`}>
+                        FXBlitz: {String(inv.clientGamesPlayed)} games
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <p className="text-gray-500 text-xs">Amount</p>
+                        <p className="font-semibold">{formatUSDC(inv.amount)} USDC</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 text-xs">Factoring Fee</p>
+                        <p className="font-semibold">{(Number(inv.factoringFee) / 100).toFixed(2)}%</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 text-xs">Due Date</p>
+                        <p className="font-semibold">{safeDate(inv.dueDate)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 text-xs">Client</p>
+                        <p className="font-semibold">{formatAddress(inv.client)}</p>
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-600">{inv.metadataURI}</p>
                   </div>
 
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <p className="text-gray-500 text-xs">Amount</p>
-                      <p className="font-semibold">{formatUSDC(inv.amount, usdcDecimals)} USDC</p>
+                  <div className="flex flex-col gap-3 min-w-[240px]">
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        step="0.000001"
+                        placeholder="Offer amount (USDC)"
+                        className="input text-sm"
+                        value={offerAmount}
+                        onChange={(e) => setOfferAmount(e.target.value)}
+                        disabled={actionId === inv.id}
+                      />
                     </div>
-                    <div>
-                      <p className="text-gray-500 text-xs">Factoring Fee</p>
-                      <p className="font-semibold">{(Number(inv.factoringFee) / 100).toFixed(2)}%</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500 text-xs">Due Date</p>
-                      <p className="font-semibold">{safeDate(inv.dueDate)}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500 text-xs">Client</p>
-                      <p className="font-semibold">{formatAddress(inv.client)}</p>
-                    </div>
+                    <button
+                      onClick={() => handleRequestFactoring(inv.id)}
+                      disabled={actionId === inv.id || !offerAmount || Number(inv.clientGamesPlayed) < 1}
+                      className="btn-primary flex items-center justify-center gap-2 text-sm"
+                    >
+                      {actionId === inv.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <HandCoins className="w-4 h-4" />}
+                      Request Factoring
+                    </button>
+                    <a
+                      href={`${ARC_EXPLORER}/tx/${String(inv.id)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn-secondary flex items-center justify-center gap-2 text-sm"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      View on Explorer
+                    </a>
                   </div>
-                  <p className="text-sm text-gray-600">{inv.metadataURI}</p>
-                </div>
-
-                <div className="flex flex-col gap-3 min-w-[240px]">
-                  <div className="flex gap-2">
-                    <input
-                      type="number"
-                      step="0.000001"
-                      placeholder="Offer amount (USDC)"
-                      className="input text-sm"
-                      value={offerAmount}
-                      onChange={(e) => setOfferAmount(e.target.value)}
-                      disabled={actionId === inv.id}
-                    />
-                  </div>
-                  <button
-                    onClick={() => handleRequestFactoring(inv.id)}
-                    disabled={actionId === inv.id || !offerAmount || Number(inv.clientGamesPlayed) < 1}
-                    className="btn-primary flex items-center justify-center gap-2 text-sm"
-                  >
-                    {actionId === inv.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <HandCoins className="w-4 h-4" />}
-                    Request Factoring
-                  </button>
-                  <a
-                    href={`${ARC_EXPLORER}/tx/${String(inv.id)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn-secondary flex items-center justify-center gap-2 text-sm"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    View on Explorer
-                  </a>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
