@@ -44,7 +44,11 @@ export const safeDate = (timestamp: bigint | any): string => {
   try {
     const ts = safeNumber(timestamp);
     if (ts === 0) return '—';
-    return new Date(ts * 1000).toLocaleDateString();
+    const d = new Date(ts * 1000);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}.${month}.${year}`;
   } catch {
     return '—';
   }
