@@ -30,7 +30,7 @@ export default function CreateInvoice() {
 
       const tx = await contract.createInvoice(
         form.client,
-        parseUSDC(form.amount, 18),
+        parseUSDC(form.amount),
         dueTimestamp,
         factoringFeeBps,
         form.description
