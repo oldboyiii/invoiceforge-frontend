@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@/hooks/useWallet';
 import { useInvoice, useUSDC } from '@/hooks/useContract';
-import { Contract } from 'ethers';
 import { formatUSDC, formatAddress, statusLabels, statusColors, factoringStatusLabels, safeBigInt, safeDate } from '@/utils/format';
-import { ARC_EXPLORER, USDC_ADDRESS, INVOICE_ADDRESS } from '@/config/contracts';
+import { ARC_EXPLORER, INVOICE_ADDRESS } from '@/config/contracts';
 import { Loader2, CheckCircle, XCircle, HandCoins, ExternalLink } from 'lucide-react';
 
 interface Invoice {
@@ -46,15 +45,14 @@ function parseInvoice(raw: any): Invoice {
 }
 
 export default function MyInvoices() {
-  const { address, signer, provider, isConnected, isArcNetwork } = useWallet();
+  const { address, signer, isConnected, isArcNetwork } = useWallet();
   const contract = useInvoice(signer);
-  const readContract = useInvoice(provider);
+  const readContract = useInvoice(signer); // используем signer для чтения тоже
   const usdcContract = useUSDC(signer);
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
-  const [usdcDecimals, setUsdcDecimals] = useState(18);
   const [error, setError] = useState<string | null>(null);
 
   const fetchInvoices = useCallback(async () => {
@@ -62,8 +60,6 @@ export default function MyInvoices() {
     setLoading(true);
     setError(null);
     try {
-      console.log('Fetching invoices for:', address);
-
       let issuerIds: any[] = [];
       let clientIds: any[] = [];
 
@@ -75,16 +71,12 @@ export default function MyInvoices() {
         clientIds = await readContract.getClientInvoices(address);
       } catch (e) { console.log('getClientInvoices error:', e); }
 
-      console.log('Issuer IDs:', issuerIds);
-      console.log('Client IDs:', clientIds);
-
       const allIds = Array.from(new Set([...issuerIds, ...clientIds].map((id: any) => safeBigInt(id))));
       const items: Invoice[] = [];
 
       for (const id of allIds) {
         try {
           const raw = await readContract.getInvoice(id);
-          console.log('Raw invoice', id.toString(), ':', raw);
           const inv = parseInvoice(raw);
 
           let factoring = null;
@@ -98,7 +90,7 @@ export default function MyInvoices() {
                 status: Number(f?.status || f?.[2] || 0),
               };
             }
-          } catch (e) { /* no factoring */ }
+          } catch { /* no factoring */ }
 
           inv.factoring = factoring;
           items.push(inv);
@@ -113,7 +105,6 @@ export default function MyInvoices() {
         return aTime > bTime ? -1 : aTime < bTime ? 1 : 0;
       });
 
-      console.log('Final items:', items);
       setInvoices(items);
     } catch (err: any) {
       console.error('Fetch invoices error:', err);
@@ -122,17 +113,6 @@ export default function MyInvoices() {
       setLoading(false);
     }
   }, [readContract, address]);
-
-  useEffect(() => {
-    if (provider) {
-      const usdc = new Contract(
-        USDC_ADDRESS,
-        ['function decimals() view returns (uint8)'],
-        provider
-      );
-      usdc.decimals().then((d: number) => setUsdcDecimals(d)).catch(() => setUsdcDecimals(18));
-    }
-  }, [provider]);
 
   useEffect(() => {
     if (isConnected && isArcNetwork) fetchInvoices();
@@ -226,6 +206,8 @@ export default function MyInvoices() {
             const isIssuer = inv.issuer?.toLowerCase() === address?.toLowerCase();
             const isClient = inv.client?.toLowerCase() === address?.toLowerCase();
             const isPending = inv.status === 0;
+            const statusLabel = statusLabels[inv.status];
+            const statusColor = statusColors[inv.status];
 
             return (
               <div key={String(inv.id)} className="card">
@@ -233,19 +215,21 @@ export default function MyInvoices() {
                   <div className="flex-1 space-y-2">
                     <div className="flex items-center gap-3">
                       <span className="font-mono text-sm text-gray-500">#{String(inv.id)}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[inv.status] || 'bg-gray-100 text-gray-800'}`}>
-                        {statusLabels[inv.status] || 'Unknown'}
-                      </span>
+                      {statusLabel && (
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColor}`}>
+                          {statusLabel}
+                        </span>
+                      )}
                       {inv.factoring && (
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                          Factoring: {factoringStatusLabels[inv.factoring.status] || 'Unknown'}
+                          Factoring: {factoringStatusLabels[inv.factoring.status] || 'Status ' + inv.factoring.status}
                         </span>
                       )}
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                       <div>
                         <p className="text-gray-500 text-xs">Amount</p>
-                        <p className="font-semibold">{formatUSDC(inv.amount, usdcDecimals)} USDC</p>
+                        <p className="font-semibold">{formatUSDC(inv.amount)} USDC</p>
                       </div>
                       <div>
                         <p className="text-gray-500 text-xs">Due Date</p>
