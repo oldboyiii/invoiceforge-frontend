@@ -1,5 +1,7 @@
 export const formatAddress = (addr: string) =>
-  addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '0x0000...0000';
+  addr && addr !== '0x0000000000000000000000000000000000000000'
+    ? `${addr.slice(0, 6)}...${addr.slice(-4)}`
+    : '—';
 
 export const safeBigInt = (val: any): bigint => {
   if (val === undefined || val === null) return 0n;
@@ -12,23 +14,26 @@ export const safeNumber = (val: any): number => {
   try { return Number(val.toString()); } catch { return 0; }
 };
 
-export const formatUSDC = (amount: bigint | any, decimals: number): string => {
+// Контракт использует 6 decimals (см. бриф)
+export const USDC_DECIMALS = 6;
+
+export const formatUSDC = (amount: bigint | any): string => {
   try {
     const amt = safeBigInt(amount);
     if (amt === 0n) return '0';
-    const str = amt.toString().padStart(decimals + 1, '0');
-    const intPart = str.slice(0, -decimals) || '0';
-    const fracPart = str.slice(-decimals).replace(/0+$/, '');
+    const str = amt.toString().padStart(USDC_DECIMALS + 1, '0');
+    const intPart = str.slice(0, -USDC_DECIMALS) || '0';
+    const fracPart = str.slice(-USDC_DECIMALS).replace(/0+$/, '');
     return fracPart ? `${intPart}.${fracPart}` : intPart;
   } catch {
     return '0';
   }
 };
 
-export const parseUSDC = (amount: string, decimals: number): bigint => {
+export const parseUSDC = (amount: string): bigint => {
   try {
     const [intPart, fracPart = ''] = amount.split('.');
-    const padded = fracPart.padEnd(decimals, '0').slice(0, decimals);
+    const padded = fracPart.padEnd(USDC_DECIMALS, '0').slice(0, USDC_DECIMALS);
     return BigInt(intPart + padded);
   } catch {
     return 0n;
@@ -38,10 +43,10 @@ export const parseUSDC = (amount: string, decimals: number): bigint => {
 export const safeDate = (timestamp: bigint | any): string => {
   try {
     const ts = safeNumber(timestamp);
-    if (ts === 0) return 'No date';
+    if (ts === 0) return '—';
     return new Date(ts * 1000).toLocaleDateString();
   } catch {
-    return 'Invalid date';
+    return '—';
   }
 };
 
