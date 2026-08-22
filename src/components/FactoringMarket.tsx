@@ -83,7 +83,6 @@ export default function FactoringMarket() {
 
           if (inv.status !== 0) continue;
           if (inv.issuer.toLowerCase() === address.toLowerCase()) continue;
-          if (inv.client.toLowerCase() === address.toLowerCase()) continue;
 
           let games = 0n;
           try {
@@ -188,6 +187,11 @@ export default function FactoringMarket() {
                       }`}>
                         FXBlitz: {String(inv.clientGamesPlayed)} games
                       </span>
+                      {inv.client.toLowerCase() === address?.toLowerCase() && (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                          You are the client
+                        </span>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -225,7 +229,7 @@ export default function FactoringMarket() {
                     </div>
                     <button
                       onClick={() => handleRequestFactoring(inv.id)}
-                      disabled={actionId === inv.id || !offerAmount || Number(inv.clientGamesPlayed) < 1}
+                      disabled={actionId === inv.id || !offerAmount || Number(inv.clientGamesPlayed) < 1 || inv.client.toLowerCase() === address?.toLowerCase()}
                       className="btn-primary flex items-center justify-center gap-2 text-sm"
                     >
                       {actionId === inv.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <HandCoins className="w-4 h-4" />}
