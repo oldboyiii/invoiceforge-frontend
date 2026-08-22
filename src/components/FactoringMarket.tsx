@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@/hooks/useWallet';
 import { useInvoice, useFXBlitz } from '@/hooks/useContract';
-import { BrowserProvider, Contract } from 'ethers';
-import { formatUSDC, formatAddress, statusLabels, statusColors, ARC_EXPLORER } from '@/utils/format';
+import { Contract } from 'ethers';
+import { formatUSDC, formatAddress, statusLabels, statusColors } from '@/utils/format';
+import { ARC_EXPLORER, USDC_ADDRESS } from '@/config/contracts';
 import { Loader2, HandCoins, ExternalLink } from 'lucide-react';
 
 interface MarketInvoice {
@@ -35,7 +36,7 @@ export default function FactoringMarket() {
     setLoading(true);
     try {
       const items: MarketInvoice[] = [];
-
+      
       for (let i = 1; i <= 100; i++) {
         try {
           const inv = await readContract.getInvoice(BigInt(i));
@@ -44,7 +45,7 @@ export default function FactoringMarket() {
           if (inv.client.toLowerCase() === address.toLowerCase()) continue;
 
           const games = await fxblitz.gamesPlayed(inv.client);
-
+          
           items.push({
             id: inv.id,
             issuer: inv.issuer,
@@ -73,7 +74,7 @@ export default function FactoringMarket() {
   useEffect(() => {
     if (provider) {
       const usdc = new Contract(
-        import.meta.env.VITE_USDC_ADDRESS,
+        USDC_ADDRESS,
         ['function decimals() view returns (uint8)'],
         provider
       );
@@ -145,7 +146,7 @@ export default function FactoringMarket() {
                       FXBlitz: {String(inv.clientGamesPlayed)} games
                     </span>
                   </div>
-
+                  
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
                       <p className="text-gray-500 text-xs">Amount</p>
