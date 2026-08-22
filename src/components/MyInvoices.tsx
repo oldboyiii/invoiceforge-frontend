@@ -23,6 +23,23 @@ interface Invoice {
   } | null;
 }
 
+function parseInvoice(raw: any): Invoice {
+  // ethers v6 может вернуть массив или объект
+  const get = (field: string, idx: number) => raw[field] ?? raw[idx];
+  return {
+    id: BigInt(get('id', 0)?.toString() || 0),
+    issuer: get('issuer', 1),
+    client: get('client', 2),
+    amount: BigInt(get('amount', 3)?.toString() || 0),
+    dueDate: BigInt(get('dueDate', 4)?.toString() || 0),
+    factoringFee: BigInt(get('factoringFee', 5)?.toString() || 0),
+    metadataURI: get('metadataURI', 6) || '',
+    status: Number(get('status', 7) || 0),
+    createdAt: BigInt(get('createdAt', 8)?.toString() || 0),
+    factoring: null,
+  };
+}
+
 export default function MyInvoices() {
   const { address, signer, provider, isConnected, isArcNetwork } = useWallet();
   const contract = useInvoice(signer);
@@ -33,51 +50,51 @@ export default function MyInvoices() {
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [usdcDecimals, setUsdcDecimals] = useState(18);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchInvoices = useCallback(async () => {
     if (!readContract || !address) return;
     setLoading(true);
+    setError(null);
     try {
       const [issuerIds, clientIds] = await Promise.all([
         readContract.getIssuerInvoices(address),
         readContract.getClientInvoices(address),
       ]);
 
-      const allIds = Array.from(new Set([...issuerIds, ...clientIds]));
+      const allIds = Array.from(new Set([...issuerIds, ...clientIds].map((id: any) => BigInt(id.toString()))));
       const items: Invoice[] = [];
 
       for (const id of allIds) {
-        const inv = await readContract.getInvoice(id);
-        let factoring = null;
         try {
-          const f = await readContract.getFactoringRequest(id);
-          if (f.factor !== '0x0000000000000000000000000000000000000000') {
-            factoring = {
-              factor: f.factor,
-              offerAmount: f.offerAmount,
-              status: Number(f.status),
-            };
-          }
-        } catch {}
+          const raw = await readContract.getInvoice(id);
+          const inv = parseInvoice(raw);
 
-        items.push({
-          id: inv.id,
-          issuer: inv.issuer,
-          client: inv.client,
-          amount: inv.amount,
-          dueDate: inv.dueDate,
-          factoringFee: inv.factoringFee,
-          metadataURI: inv.metadataURI,
-          status: Number(inv.status),
-          createdAt: inv.createdAt,
-          factoring,
-        });
+          let factoring = null;
+          try {
+            const f = await readContract.getFactoringRequest(id);
+            const factor = f.factor || f[0];
+            if (factor && factor !== '0x0000000000000000000000000000000000000000') {
+              factoring = {
+                factor: factor,
+                offerAmount: BigInt((f.offerAmount || f[1])?.toString() || 0),
+                status: Number(f.status || f[2] || 0),
+              };
+            }
+          } catch {}
+
+          inv.factoring = factoring;
+          items.push(inv);
+        } catch (e) {
+          console.error(`Failed to fetch invoice ${id}:`, e);
+        }
       }
 
       items.sort((a, b) => Number(b.createdAt - a.createdAt));
       setInvoices(items);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('Fetch invoices error:', err);
+      setError(err.reason || err.message || 'Unknown error');
     } finally {
       setLoading(false);
     }
@@ -154,13 +171,24 @@ export default function MyInvoices() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="max-w-6xl mx-auto mt-8">
+        <h2 className="text-2xl font-bold mb-6">My Invoices</h2>
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-800">
+          <p className="font-semibold">Error loading invoices:</p>
+          <p className="text-sm">{error}</p>
+          <button onClick={fetchInvoices} className="btn-primary mt-3 text-sm">Retry</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto mt-8">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold">My Invoices</h2>
-        <button onClick={fetchInvoices} className="btn-secondary text-sm">
-          Refresh
-        </button>
+        <button onClick={fetchInvoices} className="btn-secondary text-sm">Refresh</button>
       </div>
 
       {loading ? (
@@ -172,8 +200,8 @@ export default function MyInvoices() {
       ) : (
         <div className="space-y-4">
           {invoices.map((inv) => {
-            const isIssuer = inv.issuer.toLowerCase() === address?.toLowerCase();
-            const isClient = inv.client.toLowerCase() === address?.toLowerCase();
+            const isIssuer = inv.issuer?.toLowerCase() === address?.toLowerCase();
+            const isClient = inv.client?.toLowerCase() === address?.toLowerCase();
             const isPending = inv.status === 0;
 
             return (
@@ -182,12 +210,12 @@ export default function MyInvoices() {
                   <div className="flex-1 space-y-2">
                     <div className="flex items-center gap-3">
                       <span className="font-mono text-sm text-gray-500">#{String(inv.id)}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[inv.status]}`}>
-                        {statusLabels[inv.status]}
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[inv.status] || 'bg-gray-100 text-gray-800'}`}>
+                        {statusLabels[inv.status] || 'Unknown'}
                       </span>
                       {inv.factoring && (
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                          Factoring: {factoringStatusLabels[inv.factoring.status]}
+                          Factoring: {factoringStatusLabels[inv.factoring.status] || 'Unknown'}
                         </span>
                       )}
                     </div>
@@ -219,11 +247,7 @@ export default function MyInvoices() {
                         disabled={actionLoading === Number(inv.id)}
                         className="btn-primary flex items-center gap-2 text-sm"
                       >
-                        {actionLoading === Number(inv.id) ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <CheckCircle className="w-4 h-4" />
-                        )}
+                        {actionLoading === Number(inv.id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
                         Pay
                       </button>
                     )}
@@ -234,11 +258,7 @@ export default function MyInvoices() {
                         disabled={actionLoading === Number(inv.id)}
                         className="btn-secondary flex items-center gap-2 text-sm text-red-600 hover:bg-red-50"
                       >
-                        {actionLoading === Number(inv.id) ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <XCircle className="w-4 h-4" />
-                        )}
+                        {actionLoading === Number(inv.id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
                         Cancel
                       </button>
                     )}
@@ -249,11 +269,7 @@ export default function MyInvoices() {
                         disabled={actionLoading === Number(inv.id)}
                         className="btn-primary flex items-center gap-2 text-sm bg-green-600 hover:bg-green-700"
                       >
-                        {actionLoading === Number(inv.id) ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <HandCoins className="w-4 h-4" />
-                        )}
+                        {actionLoading === Number(inv.id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <HandCoins className="w-4 h-4" />}
                         Accept Factoring
                       </button>
                     )}
