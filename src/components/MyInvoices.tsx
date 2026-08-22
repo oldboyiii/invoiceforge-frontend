@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@/hooks/useWallet';
 import { useInvoice, useUSDC } from '@/hooks/useContract';
 import { Contract } from 'ethers';
-import { formatUSDC, formatAddress, statusLabels, statusColors, factoringStatusLabels } from '@/utils/format';
+import { formatUSDC, formatAddress, statusLabels, statusColors, factoringStatusLabels, safeBigInt, safeDate } from '@/utils/format';
 import { ARC_EXPLORER, USDC_ADDRESS, INVOICE_ADDRESS } from '@/config/contracts';
 import { Loader2, CheckCircle, XCircle, HandCoins, ExternalLink } from 'lucide-react';
 
@@ -24,18 +24,23 @@ interface Invoice {
 }
 
 function parseInvoice(raw: any): Invoice {
-  // ethers v6 может вернуть массив или объект
-  const get = (field: string, idx: number) => raw[field] ?? raw[idx];
+  const get = (field: string, idx: number) => {
+    if (raw && typeof raw === 'object') {
+      return raw[field] !== undefined ? raw[field] : raw[idx];
+    }
+    return undefined;
+  };
+
   return {
-    id: BigInt(get('id', 0)?.toString() || 0),
-    issuer: get('issuer', 1),
-    client: get('client', 2),
-    amount: BigInt(get('amount', 3)?.toString() || 0),
-    dueDate: BigInt(get('dueDate', 4)?.toString() || 0),
-    factoringFee: BigInt(get('factoringFee', 5)?.toString() || 0),
+    id: safeBigInt(get('id', 0)),
+    issuer: get('issuer', 1) || '0x0000000000000000000000000000000000000000',
+    client: get('client', 2) || '0x0000000000000000000000000000000000000000',
+    amount: safeBigInt(get('amount', 3)),
+    dueDate: safeBigInt(get('dueDate', 4)),
+    factoringFee: safeBigInt(get('factoringFee', 5)),
     metadataURI: get('metadataURI', 6) || '',
     status: Number(get('status', 7) || 0),
-    createdAt: BigInt(get('createdAt', 8)?.toString() || 0),
+    createdAt: safeBigInt(get('createdAt', 8)),
     factoring: null,
   };
 }
@@ -57,40 +62,58 @@ export default function MyInvoices() {
     setLoading(true);
     setError(null);
     try {
-      const [issuerIds, clientIds] = await Promise.all([
-        readContract.getIssuerInvoices(address),
-        readContract.getClientInvoices(address),
-      ]);
+      console.log('Fetching invoices for:', address);
 
-      const allIds = Array.from(new Set([...issuerIds, ...clientIds].map((id: any) => BigInt(id.toString()))));
+      let issuerIds: any[] = [];
+      let clientIds: any[] = [];
+
+      try {
+        issuerIds = await readContract.getIssuerInvoices(address);
+      } catch (e) { console.log('getIssuerInvoices error:', e); }
+
+      try {
+        clientIds = await readContract.getClientInvoices(address);
+      } catch (e) { console.log('getClientInvoices error:', e); }
+
+      console.log('Issuer IDs:', issuerIds);
+      console.log('Client IDs:', clientIds);
+
+      const allIds = Array.from(new Set([...issuerIds, ...clientIds].map((id: any) => safeBigInt(id))));
       const items: Invoice[] = [];
 
       for (const id of allIds) {
         try {
           const raw = await readContract.getInvoice(id);
+          console.log('Raw invoice', id.toString(), ':', raw);
           const inv = parseInvoice(raw);
 
           let factoring = null;
           try {
             const f = await readContract.getFactoringRequest(id);
-            const factor = f.factor || f[0];
+            const factor = f?.factor || f?.[0];
             if (factor && factor !== '0x0000000000000000000000000000000000000000') {
               factoring = {
-                factor: factor,
-                offerAmount: BigInt((f.offerAmount || f[1])?.toString() || 0),
-                status: Number(f.status || f[2] || 0),
+                factor: String(factor),
+                offerAmount: safeBigInt(f?.offerAmount || f?.[1]),
+                status: Number(f?.status || f?.[2] || 0),
               };
             }
-          } catch {}
+          } catch (e) { /* no factoring */ }
 
           inv.factoring = factoring;
           items.push(inv);
         } catch (e) {
-          console.error(`Failed to fetch invoice ${id}:`, e);
+          console.error('Failed to fetch invoice', id.toString(), e);
         }
       }
 
-      items.sort((a, b) => Number(b.createdAt - a.createdAt));
+      items.sort((a, b) => {
+        const aTime = safeBigInt(a.createdAt);
+        const bTime = safeBigInt(b.createdAt);
+        return aTime > bTime ? -1 : aTime < bTime ? 1 : 0;
+      });
+
+      console.log('Final items:', items);
       setInvoices(items);
     } catch (err: any) {
       console.error('Fetch invoices error:', err);
@@ -226,7 +249,7 @@ export default function MyInvoices() {
                       </div>
                       <div>
                         <p className="text-gray-500 text-xs">Due Date</p>
-                        <p className="font-semibold">{new Date(Number(inv.dueDate) * 1000).toLocaleDateString()}</p>
+                        <p className="font-semibold">{safeDate(inv.dueDate)}</p>
                       </div>
                       <div>
                         <p className="text-gray-500 text-xs">Issuer</p>
@@ -293,3 +316,4 @@ export default function MyInvoices() {
     </div>
   );
 }
+
