@@ -19,6 +19,21 @@ interface MarketInvoice {
   clientGamesPlayed: bigint;
 }
 
+function parseInvoice(raw: any) {
+  const get = (field: string, idx: number) => raw[field] ?? raw[idx];
+  return {
+    id: BigInt(get('id', 0)?.toString() || 0),
+    issuer: get('issuer', 1),
+    client: get('client', 2),
+    amount: BigInt(get('amount', 3)?.toString() || 0),
+    dueDate: BigInt(get('dueDate', 4)?.toString() || 0),
+    factoringFee: BigInt(get('factoringFee', 5)?.toString() || 0),
+    metadataURI: get('metadataURI', 6) || '',
+    status: Number(get('status', 7) || 0),
+    createdAt: BigInt(get('createdAt', 8)?.toString() || 0),
+  };
+}
+
 export default function FactoringMarket() {
   const { address, signer, provider, isConnected, isArcNetwork } = useWallet();
   const contract = useInvoice(signer);
@@ -30,42 +45,43 @@ export default function FactoringMarket() {
   const [actionId, setActionId] = useState<bigint | null>(null);
   const [offerAmount, setOfferAmount] = useState('');
   const [usdcDecimals, setUsdcDecimals] = useState(18);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchMarket = useCallback(async () => {
     if (!readContract || !fxblitz || !address) return;
     setLoading(true);
+    setError(null);
     try {
       const items: MarketInvoice[] = [];
+      let consecutiveErrors = 0;
       
       for (let i = 1; i <= 100; i++) {
         try {
-          const inv = await readContract.getInvoice(BigInt(i));
+          const raw = await readContract.getInvoice(BigInt(i));
+          const inv = parseInvoice(raw);
+          
           if (inv.status !== 0) continue;
-          if (inv.issuer.toLowerCase() === address.toLowerCase()) continue;
-          if (inv.client.toLowerCase() === address.toLowerCase()) continue;
+          if (inv.issuer?.toLowerCase() === address.toLowerCase()) continue;
+          if (inv.client?.toLowerCase() === address.toLowerCase()) continue;
 
           const games = await fxblitz.gamesPlayed(inv.client);
           
           items.push({
-            id: inv.id,
-            issuer: inv.issuer,
-            client: inv.client,
-            amount: inv.amount,
-            dueDate: inv.dueDate,
-            factoringFee: inv.factoringFee,
-            metadataURI: inv.metadataURI,
-            status: Number(inv.status),
-            createdAt: inv.createdAt,
-            clientGamesPlayed: games,
+            ...inv,
+            clientGamesPlayed: BigInt(games?.toString() || 0),
           });
-        } catch {
-          break;
+          consecutiveErrors = 0;
+        } catch (e: any) {
+          consecutiveErrors++;
+          // Если 3 подряд ошибки — значит дошли до конца списка инвойсов
+          if (consecutiveErrors >= 3) break;
         }
       }
 
       setInvoices(items);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('Fetch market error:', err);
+      setError(err.reason || err.message || 'Unknown error');
     } finally {
       setLoading(false);
     }
@@ -112,13 +128,24 @@ export default function FactoringMarket() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="max-w-6xl mx-auto mt-8">
+        <h2 className="text-2xl font-bold mb-6">Factoring Market</h2>
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-800">
+          <p className="font-semibold">Error loading market:</p>
+          <p className="text-sm">{error}</p>
+          <button onClick={fetchMarket} className="btn-primary mt-3 text-sm">Retry</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto mt-8">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold">Factoring Market</h2>
-        <button onClick={fetchMarket} className="btn-secondary text-sm">
-          Refresh
-        </button>
+        <button onClick={fetchMarket} className="btn-secondary text-sm">Refresh</button>
       </div>
 
       {loading ? (
@@ -135,13 +162,11 @@ export default function FactoringMarket() {
                 <div className="flex-1 space-y-2">
                   <div className="flex items-center gap-3 flex-wrap">
                     <span className="font-mono text-sm text-gray-500">#{String(inv.id)}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[inv.status]}`}>
-                      {statusLabels[inv.status]}
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[inv.status] || 'bg-gray-100 text-gray-800'}`}>
+                      {statusLabels[inv.status] || 'Unknown'}
                     </span>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                      Number(inv.clientGamesPlayed) >= 1
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-red-100 text-red-800'
+                      Number(inv.clientGamesPlayed) >= 1 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                     }`}>
                       FXBlitz: {String(inv.clientGamesPlayed)} games
                     </span>
@@ -185,11 +210,7 @@ export default function FactoringMarket() {
                     disabled={actionId === inv.id || !offerAmount || Number(inv.clientGamesPlayed) < 1}
                     className="btn-primary flex items-center justify-center gap-2 text-sm"
                   >
-                    {actionId === inv.id ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <HandCoins className="w-4 h-4" />
-                    )}
+                    {actionId === inv.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <HandCoins className="w-4 h-4" />}
                     Request Factoring
                   </button>
                   <a
