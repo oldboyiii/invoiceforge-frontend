@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@/hooks/useWallet';
 import { useInvoice, useUSDC } from '@/hooks/useContract';
-import { BrowserProvider, Contract } from 'ethers';
-import { formatUSDC, formatAddress, statusLabels, statusColors, factoringStatusLabels, ARC_EXPLORER } from '@/utils/format';
+import { Contract } from 'ethers';
+import { formatUSDC, formatAddress, statusLabels, statusColors, factoringStatusLabels } from '@/utils/format';
+import { ARC_EXPLORER, USDC_ADDRESS, INVOICE_ADDRESS } from '@/config/contracts';
 import { Loader2, CheckCircle, XCircle, HandCoins, ExternalLink } from 'lucide-react';
 
 interface Invoice {
@@ -85,7 +86,7 @@ export default function MyInvoices() {
   useEffect(() => {
     if (provider) {
       const usdc = new Contract(
-        import.meta.env.VITE_USDC_ADDRESS,
+        USDC_ADDRESS,
         ['function decimals() view returns (uint8)'],
         provider
       );
@@ -101,9 +102,9 @@ export default function MyInvoices() {
     if (!contract || !usdcContract || !address) return;
     setActionLoading(Number(invoiceId));
     try {
-      const allowance = await usdcContract.allowance(address, import.meta.env.VITE_INVOICE_CONTRACT);
+      const allowance = await usdcContract.allowance(address, INVOICE_ADDRESS);
       if (allowance < amount) {
-        const approveTx = await usdcContract.approve(import.meta.env.VITE_INVOICE_CONTRACT, amount);
+        const approveTx = await usdcContract.approve(INVOICE_ADDRESS, amount);
         await approveTx.wait();
       }
       const tx = await contract.payInvoice(invoiceId);
