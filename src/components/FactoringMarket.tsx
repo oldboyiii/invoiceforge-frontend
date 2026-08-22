@@ -170,6 +170,7 @@ export default function FactoringMarket() {
           {invoices.map((inv) => {
             const statusLabel = statusLabels[inv.status];
             const statusColor = statusColors[inv.status];
+            const isClient = address ? inv.client.toLowerCase() === address.toLowerCase() : false;
 
             return (
               <div key={String(inv.id)} className="card">
@@ -187,7 +188,7 @@ export default function FactoringMarket() {
                       }`}>
                         FXBlitz: {String(inv.clientGamesPlayed)} games
                       </span>
-                      {inv.client.toLowerCase() === address?.toLowerCase() && (
+                      {isClient && (
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
                           You are the client
                         </span>
@@ -229,7 +230,7 @@ export default function FactoringMarket() {
                     </div>
                     <button
                       onClick={() => handleRequestFactoring(inv.id)}
-                      disabled={actionId === inv.id || !offerAmount || Number(inv.clientGamesPlayed) < 1 || inv.client.toLowerCase() === address?.toLowerCase()}
+                      disabled={actionId === inv.id || !offerAmount || Number(inv.clientGamesPlayed) < 1 || isClient}
                       className="btn-primary flex items-center justify-center gap-2 text-sm"
                     >
                       {actionId === inv.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <HandCoins className="w-4 h-4" />}
