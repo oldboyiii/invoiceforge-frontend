@@ -25,7 +25,8 @@ export default function CreateInvoice() {
 
     setLoading(true);
     try {
-      const dueTimestamp = Math.floor(new Date(form.dueDate).getTime() / 1000);
+      const [day, month, year] = form.dueDate.split('.');
+      const dueTimestamp = Math.floor(new Date(`${year}-${month}-${day}T00:00:00`).getTime() / 1000);
       const factoringFeeBps = Math.floor(parseFloat(form.factoringFee) * 100);
 
       const tx = await contract.createInvoice(
@@ -104,12 +105,15 @@ export default function CreateInvoice() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
             <input
-              type="datetime-local"
+              type="text"
               required
+              placeholder="DD.MM.YYYY"
+              pattern="\d{2}\.\d{2}\.\d{4}"
               className="input"
               value={form.dueDate}
               onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
             />
+            <p className="text-xs text-gray-500 mt-1">Format: DD.MM.YYYY</p>
           </div>
         </div>
 
