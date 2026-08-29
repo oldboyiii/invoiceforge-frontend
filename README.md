@@ -140,13 +140,3 @@ InvoiceForge was built for the **Circle Builder Grant** to demonstrate real-worl
 
 MIT
 ```
-
----
-
-## 🔧 Как добавить
-
-1. Откройте `README.md` в корне репозитория на GitHub
-2. Нажмите ✏️ **Edit**
-3. Вставьте текст выше
-4. **Commit changes**
-
