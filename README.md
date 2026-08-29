@@ -1,6 +1,4 @@
- Вот готовый `README.md` — скопируйте и вставьте в корень репозитория на GitHub:
 
-```markdown
 # InvoiceForge
 
 **Invoice factoring dApp built on Arc Network**
